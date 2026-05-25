@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Control Panel</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            background-color: #e7eaf3;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #333;
+        }
+        h1 {
+            margin: 20px 0;
+            color: #2c3e50;
+            font-size: 28px;
+        }
+        .main-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            max-width: 1200px;
+            margin: 20px auto;
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+        }
+        .video-container {
+            flex: 1;
+            margin-right: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .video-container img {
+            width: 100%;
+            max-width: 420px;
+            height: 340px;
+            border: 2px solid #5c1a1a;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+        .mode-panel, .status-panel {
+            flex: 1;
+            background: #f5f5f5;
+            border: 1px solid #9c489c;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            margin: 0 10px;
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 24px;
+            color: #2980b9;
+            text-align: center;
+        }
+        .status-item, .mode-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 18px;
+        }
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-gap: 10px;
+            margin-top: 20px;
+        }
+        .control-panel button {
+            padding: 15px;
+            font-size: 16px;
+            font-weight: bold;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .control-panel button:hover {
+            background-color: #2980b9;
+        }
+        .control-panel button:active {
+            background-color: #0056b3;
+        }
+        .mode-panel .switch {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .mode-panel .switch input {
+            display: none;
+        }
+        .mode-panel .slider {
+            position: relative;
+            width: 40px;
+            height: 20px;
+            background: #ccc;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .mode-panel .slider:before {
+            content: "";
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+        .mode-panel input:checked + .slider {
+            background: #3498db;
+        }
+        .mode-panel input:checked + .slider:before {
+            transform: translateX(20px);
+        }
+        #current-mode {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+        .mode-header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .center {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>Robot Control Panel</h1>
+
+    <div class="main-container">
+        <!-- Video Display -->
+        
+        <div class="video-container">
+            <img src="/video_feed/color" alt="Color Detection Camera" id="color-video">
+            <img src="/video_feed/object" alt="Object Detection Camera" id="object-video">
+        </div>
+        
+        <!-- Mode Switch -->
+        <div class="mode-panel">
+            <div class="mode-header">
+                <h2>Mode</h2>
+            </div>
+            <div class="status-panel">
+                <span>Mode:</span> <div id="current-mode" style="margin-left: 125px;">Manual</div>
+                <label class="switch">
+                    <input type="checkbox" id="mode-switch" onchange="toggleMode()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <!-- Auto Mode Settings -->
+            <div class="auto-mode" id="auto-mode" style="display: none;">
+                <div class="status-panel">
+                    <span>Number of plants to water:</span>
+                    <input type="number" id="plant-count" value="0">
+                </div>
+                <div class="status-panel">
+                    <span>Start Time:</span>
+                    <input type="time" id="start-time">
+                </div>
+                <div class="status-panel">
+                    <span>End Time:</span>
+                    <input type="time" id="end-time">
+                </div>
+                <div class="control-panel center">
+                    <button type="button" onclick="sendAutoCommand()">Confirm</button>
+                </div>
+            </div>
+            <!-- Manual Control Panel -->
+            <div class="control-panel" id="manual-control">
+                <button onclick="sendCommand('q')">↖</button>
+                <button onclick="sendCommand('w')">↑</button>
+                <button onclick="sendCommand('e')">↗</button>
+                <button onclick="sendCommand('a')">←</button>
+                <button onclick="sendCommand('1')">STOP</button>
+                <button onclick="sendCommand('d')">→</button>
+                <button onclick="sendCommand('z')">↙</button>
+                <button onclick="sendCommand('s')">↓</button>
+                <button onclick="sendCommand('x')">↘</button>
+                <button onclick="sendCommand('2')">Rotate_Left</button>
+                <button onclick="sendCommand('3')">Rotate_Right</button>
+                <button onclick="sendCommand('r')">Relay ON/OFF</button>
+                <button onclick="sendCommand('+')">Speed +</button>
+                <button onclick="sendCommand('-')">Speed -</button>
+            </div>
+        </div>
+
+        <!-- Status Panel -->
+        <div class="status-panel">
+            <div class="mode-header">
+                <h2>Status</h2>
+            </div>
+            <div class="status-panel">
+                <div>
+                    <span>Battery_Percentage:</span>
+                    <span id="battery-status">Loading...</span>
+                </div>
+                <div>
+                    <span>Voltage:</span>
+                    <span id="voltage-status">Loading...</span>
+                </div>
+                <div>
+                    <span>Current:</span>
+                    <span id="current-status">Loading...</span>
+                </div>
+                <div>
+                    <span>Power:</span>
+                    <span id="power-status">Loading...</span>
+                </div>
+                <div>
+                    <span>Remaining_Time:</span>
+                    <span id="remain-time-status">Loading...</span>
+                </div>
+            </div>
+            <div class="status-panel">
+                <span>Water Level:</span>
+                <span id="water-level-status">Loading...</span>
+            </div>
+            <div class="status-panel">
+                <span>Current Time:</span>
+                <span id="current-time">Loading...</span>
+            </div>
+            <div class="status-panel">
+                <span>Wheel Speed:</span>
+                <span id="wheel-speed">Loading...</span>
+            </div>
+
+            <div class="status-panel">
+                <div>
+                    <span>Front Sensor:</span>
+                    <span id="front-sensor">Loading...</span>
+                </div>
+                <div>
+                    <span>Left Sensor:</span>
+                    <span id="left-sensor">Loading...</span>
+                </div>
+                <div >
+                    <span>Right Sensor:</span>
+                    <span id="right-sensor">Loading...</span>
+                </div>
+            </div>
+            <div class="status-panel">
+                <span>State:</span>
+                <span id="robot-state">Loading...</span>
+            </div>
+            <div class="status-panel">
+                <span>duty:</span>
+                <span id="robot-current-state">Loading...</span>
+            </div>
+            <div class="status-panel">
+                <span>Direction:</span>
+                <span id="robot-direction">Loading...</span>
+            </div>
+            <div class="status-panel">
+                <div>
+                    <span>Servo Top:</span>
+                    <span id="servo_up">Loading...</span>
+                </div>
+                <div>
+                    <span>Servo Down:</span>
+                    <span id="servo_down">Loading...</span>
+                </div>
+            </div>
+    </div>
+
+    <script>
+
+        setInterval(() => {
+                    const img = document.getElementById('line-image');
+                    img.src = img.src.split('?')[0] + '?' + new Date().getTime(); // Bypass caching
+                }, 100);
+
+        function sendCommand(command) {
+            fetch('/control', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ command: command })
+            }).catch(err => console.error('Failed to send command', err));
+        }
+        // lay mode dieu khien xe
+        function getMode(){
+            document.getElementById('mode-switch').addEventListener('change', function(){
+                const isOn = this.checked;
+                const mode = isOn ? 'auto':'manual';
+                fetch('/mode', {
+                method: 'POST',
+                headers:{
+                    'content-Type': 'application/json'
+                },
+                body: JSON.stringify({ mode: mode})
+            }
+        ).catch(err => console.error('Failed to send mode', err));
+        })}
+            
+        function updateStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('battery-status').innerText = data.battery.toFixed(1) + '%';
+                    document.getElementById('voltage-status').innerText = data.voltage.toFixed(1) + 'V';
+                    document.getElementById('current-status').innerText = data.current.toFixed(1) + 'mA';
+                    document.getElementById('power-status').innerText = data.power.toFixed(1) + 'mW';
+                    document.getElementById('remain-time-status').innerText = data.remaining_time.toFixed(1) +' hours';
+                    document.getElementById('water-level-status').innerText = data.water;
+                    document.getElementById('wheel-speed').innerText = data.wheel_speed.toFixed(2) + ' m/s';
+                    document.getElementById('front-sensor').innerText = data.front_sensor.toFixed(1) +'cm';
+                    document.getElementById('left-sensor').innerText = data.left_sensor.toFixed(1) +'cm';
+                    document.getElementById('right-sensor').innerText = data.right_sensor.toFixed(1) +'cm';
+                    document.getElementById('robot-direction').innerText = data.robot_direction; 
+                    document.getElementById('robot-current-state').innerText = data.duty; 
+                    document.getElementById('robot-state').innerText = data.state;  // Cập nhật trạng thái
+                    document.getElementById('servo_down').innerText = data.servo_down.toFixed(1) +'degree';
+                    document.getElementById('servo_up').innerText = data.servo_up.toFixed(1) +'degree'; 
+                }).catch(err => console.error('Failed to fetch status', err)); 
+        }
+        
+        function updateCurrentTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            document.getElementById('current-time').innerText = timeString;
+        }
+    
+        function toggleMode() {
+            const isAuto = document.getElementById('mode-switch').checked;
+            document.getElementById('auto-mode').style.display = isAuto ? 'block' : 'none';
+            document.getElementById('manual-control').style.display = isAuto ? 'none' : 'grid';
+            document.getElementById('current-mode').innerText = isAuto ? 'Auto' : 'Manual';
+        }
+
+        function sendAutoCommand() {
+            let noPlant = document.getElementById('plant-count');
+            let startTime = document.getElementById('start-time').value;
+            let endTime = document.getElementById('end-time').value;
+            let value1 = noPlant.value;
+        
+            // Gửi lệnh để chuyển sang chế độ tự động
+            fetch('/mode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ mode: 'auto' }) // Chuyển sang chế độ tự động
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Tiếp tục gửi số lượng cây và thời gian hoạt động
+                    return fetch('/auto-command', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ value1, startTime, endTime }) // Gửi số lượng cây và thời gian
+                    });
+                } else {
+                    throw new Error('Failed to switch to auto mode');
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    // Bắt đầu hiển thị luồng video sau khi lệnh tự động đã được gửi thành công
+                    document.getElementById('color-video').src = '/video_feed/color'; // Đường dẫn đến luồng video phát hiện màu
+                    document.getElementById('object-video').src = '/video_feed/object'; // Đường dẫn đến luồng video phát hiện đối tượng
+                } else {
+                    throw new Error('Failed to send auto command');
+                }
+            })
+            .catch(err => console.error('Failed to send command', err));
+        }
+        
+        // Update status every 5 seconds
+        setInterval(updateStatus, 1000);
+        setInterval(updateCurrentTime, 1000);
+        updateStatus();
+        updateCurrentTime();
+    
+        // Initialize mode
+        toggleMode();
+        getMode();
+    
+        
+    </script>
+                

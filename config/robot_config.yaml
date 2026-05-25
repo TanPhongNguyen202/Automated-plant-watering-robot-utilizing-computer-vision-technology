@@ -1,0 +1,53 @@
+# Robot Configuration File
+# Centralized settings for the automated plant-watering robot
+
+hardware:
+  motors:
+    max_speed: 1.0              # Maximum motor speed (0-1)
+    acceleration_time: 0.5      # Time to reach max speed (seconds)
+    pwm_frequency: 1000         # PWM frequency (Hz)
+  
+  ultrasonic:
+    safe_distance_cm: 30        # Safe distance from obstacles (cm)
+    critical_distance_cm: 15    # Critical distance threshold (cm)
+    sample_rate_hz: 20          # Sensor sampling rate (Hz)
+  
+  camera:
+    width: 640                  # Camera resolution width
+    height: 480                 # Camera resolution height
+    fps: 30                     # Camera frame rate (fps)
+    auto_reconnect: true        # Auto-reconnect on disconnect
+
+vision:
+  red_line:
+    hsv_ranges:
+      - [[0, 120, 70], [10, 255, 255]]      # Lower red range
+      - [[170, 120, 70], [180, 255, 255]]   # Upper red range
+    min_contour_area: 500       # Minimum contour area (pixels)
+  
+  object_detection:
+    model_path: "/models/detect.tflite"
+    confidence_threshold: 0.7   # Detection confidence threshold
+    frame_skip: 2               # Skip frames for performance (1=process every frame)
+
+control:
+  pid:
+    kp: 0.5                     # Proportional gain
+    ki: 0.01                    # Integral gain
+    kd: 0.1                     # Derivative gain
+    output_limits: [-1.0, 1.0]  # [min, max] output limits
+  
+  obstacle_avoidance:
+    strategy: "wall_following"  # Strategy: wall_following or random_rotate
+    max_rotation_angle: 45      # Max rotation angle (degrees)
+
+safety:
+  watchdog_timeout: 0.5         # Watchdog timeout (seconds)
+  battery_min_voltage: 14.8     # Minimum safe voltage (V)
+  battery_critical_voltage: 14.0 # Critical voltage level (V)
+  max_motor_current: 2.5        # Maximum motor current (amps)
+  
+mission:
+  watering_duration: 3.0        # Watering time per plant (seconds)
+  search_timeout: 60            # Max search time (seconds)
+  return_to_charger_threshold: 14.5  # Battery level to return (V)
