@@ -1,5 +1,45 @@
 # Automated Plant-Watering Robot 🤖
 
+**[📖 English](#english) | [🇻🇳 Tiếng Việt](#tiếng-việt)**
+
+---
+
+## 🇻🇳 Tiếng Việt
+
+### Robot Tưới Cây Tự Động
+
+Hệ thống tưới cây tự động chuyên nghiệp với thị giác máy tính, tránh vật cản và giám sát từ xa.
+
+**Tính năng chính:**
+- ✅ **Điều hướng tự động** - Theo dõi đường vạch nâng cao và tránh vật cản
+- ✅ **Thị giác máy tính** - Phát hiện đường vạch đỏ và nhận dạng cây
+- ✅ **Tưới nước chính xác** - Phát hiện cây tự động và tưới có mục đích
+- ✅ **Quản lý Pin** - Giám sát điện áp/dòng điện INA219
+- ✅ **Điều khiển thủ công** - Giao diện web và bàn phím
+- ✅ **Hệ thống An toàn** - Giám sát Watchdog và nút dừng khẩn cấp
+
+**Điều khiển nâng cao (✨ Mới!):**
+- ✅ **PID Line Follower** - 3 chiến lược thích ứng
+- ✅ **Tránh vật cản tinh vi** - 5 thuật toán khác nhau
+- ✅ **Điều khiển động cơ mượt** - Tăng tốc mượt, giới hạn dòng
+- ✅ **Điều khiển Kinematic** - Hỗ trợ ổ đĩa vi sai
+
+**Cài đặt:**
+```bash
+git clone https://github.com/TanPhongNguyen202/Automated-plant-watering-robot-utilizing-computer-vision-technology
+cd Automated-plant-watering-robot/Automation
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+---
+
+## <a name="english"></a>English
+
+# Automated Plant-Watering Robot 🤖
+
 Professional-grade automated plant watering system with computer vision, obstacle avoidance, and remote monitoring.
 
 ## 🎯 Features
@@ -28,7 +68,19 @@ Professional-grade automated plant watering system with computer vision, obstacl
 
 ---
 
-## 📁 Project Structure
+## � Documentation
+
+- **[Control Tuning Guide](docs/CONTROL_TUNING_GUIDE.md)** - PID tuning, strategy selection, troubleshooting
+- **[Motor Control Optimization](docs/MOTOR_CONTROL_OPTIMIZATION.md)** - Performance analysis, algorithm deep dives
+- **[Quick Reference](docs/QUICK_REFERENCE.md)** - One-page API cheatsheet
+- **[Architecture Overview](docs/ARCHITECTURE.md)** - System design and module relationships
+- **[File Index](docs/FILE_INDEX.md)** - Complete navigation guide
+
+**Code Examples:** See [examples/control_examples.py](examples/control_examples.py) for working examples
+
+---
+
+## �📁 Project Structure
 
 ```
 Automated-plant-watering-robot/
@@ -84,6 +136,23 @@ Automated-plant-watering-robot/
 │   └── robot/
 │       └── modes.py                 # Robot operation modes
 │
+├── docs/                            # Documentation (organized)
+│   ├── CONTROL_TUNING_GUIDE.md     # PID tuning and strategy selection
+│   ├── MOTOR_CONTROL_OPTIMIZATION.md
+│   ├── QUICK_REFERENCE.md          # One-page API cheatsheet
+│   ├── ARCHITECTURE.md             # System design overview
+│   ├── FILE_INDEX.md               # Navigation guide
+│   └── ...                          # Other documentation
+│
+├── examples/                        # Code examples and tutorials
+│   ├── __init__.py
+│   └── control_examples.py         # Working examples (5 scenarios)
+│
+├── tests/                           # Unit and integration tests
+│   ├── __init__.py
+│   ├── test_features.py            # Feature tests
+│   └── ...                          # Additional test modules
+│
 ├── templates/                       # Web interface HTML
 │   └── index.html
 │
@@ -94,12 +163,9 @@ Automated-plant-watering-robot/
 │
 ├── main.py                          # Main entry point
 ├── server.py                        # Flask web server
-├── line_tracker.py                  # Line tracking module
-├── test_features.py                 # Feature testing
-│
 ├── requirements.txt                 # Production dependencies
 ├── requirements-dev.txt             # Development dependencies
-├── OPTIMIZATION_REPORT.md           # Code optimization report
+├── .gitignore                       # Git ignore rules
 ├── robot.log                        # System log file
 └── README.md                        # This file
 
@@ -120,7 +186,7 @@ Automated-plant-watering-robot/
 
 1. **Clone repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/TanPhongNguyen202/Automated-plant-watering-robot-utilizing-computer-vision-technology
    cd Automated-plant-watering-robot/Automation
    ```
 
