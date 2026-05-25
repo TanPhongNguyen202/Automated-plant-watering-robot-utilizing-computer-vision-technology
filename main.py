@@ -3,7 +3,6 @@ Robot Main Control Module
 Handles mode switching and menu interface for the automated plant-watering robot.
 """
 
-from src.hardware.motors import Motors
 from src.robot.modes import Modes
 from src.utils.logger import Logger
 from time import sleep
@@ -63,7 +62,6 @@ def main() -> None:
     logger = Logger()
     logger.log_info("Robot system starting...")
     
-    motors = Motors()
     modes = Modes()
     current_mode = None
 
@@ -93,7 +91,11 @@ def main() -> None:
     except Exception as e:
         logger.log_error(f"An error occurred: {e}")
     finally:
-        motors.stop_all()
+        # Stop all motors through modes object
+        try:
+            modes.motors.stop_all()
+        except:
+            pass
         logger.log_info("Robot system stopped.")
 
 if __name__ == "__main__":
