@@ -5,16 +5,22 @@ Professional-grade automated plant watering system with computer vision, obstacl
 ## 🎯 Features
 
 ### Core Capabilities
-- ✅ **Autonomous Navigation** - Line tracking and obstacle avoidance
+- ✅ **Autonomous Navigation** - Advanced line tracking and obstacle avoidance
 - ✅ **Computer Vision** - Red line detection and plant identification
 - ✅ **Precision Watering** - Automated plant detection and targeted watering
 - ✅ **Battery Management** - INA219 voltage/current monitoring
 - ✅ **Manual Control** - Web interface and keyboard control
 - ✅ **Safety Systems** - Watchdog monitoring and emergency stop
 
+### Advanced Control Systems (✨ New!)
+- ✅ **PID Line Follower** - 3 adaptive strategies (AGGRESSIVE, BALANCED, CONSERVATIVE)
+- ✅ **Sophisticated Obstacle Avoidance** - 5 algorithms (Wall Following, Potential Field, Random Walk, BUG, Hybrid)
+- ✅ **Smooth Motor Control** - Acceleration ramping, current limiting, multi-motor coordination
+- ✅ **Kinematic Control** - Differential drive support with velocity commands
+- ✅ **Real-time Metrics** - Performance tracking and adaptive tuning
+
 ### System Architecture
 - ✅ **State Machine** - Professional robot state management
-- ✅ **PID Control** - Line tracking with tunable PID controller
 - ✅ **Configuration Management** - Centralized YAML configuration
 - ✅ **Lifecycle Logging** - Comprehensive event and error logging
 - ✅ **Rate Limiting** - Frequency-controlled main loops
@@ -46,9 +52,11 @@ Automated-plant-watering-robot/
 │   │
 │   ├── control/                     # Control modules
 │   │   ├── __init__.py
-│   │   ├── pid_controller.py       # PID for line tracking
-│   │   ├── obstacle_avoider.py     # Obstacle avoidance
-│   │   └── mission_planner.py      # Mission planning
+│   │   ├── pid_controller.py       # PID controller (P/I/D tuning)
+│   │   ├── line_follower.py        # PID-based line following ✨ NEW
+│   │   ├── obstacle_avoider.py     # 5 avoidance strategies ✨ NEW
+│   │   ├── motor_controller.py     # Smooth motor control ✨ NEW
+│   │   └── mission_planner.py      # Mission planning (planned)
 │   │
 │   ├── hardware/                    # Hardware control
 │   │   ├── battery.py              # Battery monitoring
