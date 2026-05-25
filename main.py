@@ -91,11 +91,20 @@ def main() -> None:
     except Exception as e:
         logger.log_error(f"An error occurred: {e}")
     finally:
-        # Stop all motors through modes object
+        # Cleanup: stop motors and release resources
         try:
-            modes.motors.stop_all()
-        except:
-            pass
+            # Call cleanup method if available (releases camera, stops motors)
+            if hasattr(modes, 'cleanup') and callable(modes.cleanup):
+                modes.cleanup()
+                logger.log_info("Robot cleanup completed")
+            else:
+                # Fallback: stop motors directly
+                if hasattr(modes, 'motors') and modes.motors is not None:
+                    modes.motors.stop_all()
+                    logger.log_info("Motors stopped")
+        except Exception as cleanup_error:
+            logger.log_error(f"Error during cleanup: {cleanup_error}")
+        
         logger.log_info("Robot system stopped.")
 
 if __name__ == "__main__":

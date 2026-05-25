@@ -1,11 +1,13 @@
 """
 Red Line Tracking Module
 Detects and follows a red line using computer vision and controls robot movement.
+Uses PID control for smooth line following instead of simple ON/OFF logic.
 """
 
 import cv2
 import numpy as np
 from src.utils.control_utils import set_motors_direction
+from src.control.pid_controller import PIDController
 
 # ============= Camera Configuration =============
 CAMERA_INDEX = 0
@@ -25,6 +27,23 @@ UPPER_RED2 = np.array([180, 255, 255])
 MIN_CONTOUR_AREA = 1000
 DEVIATION_THRESHOLD = 150  # Pixels from center for significant deviation
 MOTOR_SPEED = 0.1
+
+# ============= PID Controller Parameters =============
+# P: Proportional gain - controls how aggressively robot responds to error
+# I: Integral gain - compensates for steady-state error
+# D: Derivative gain - provides damping to prevent oscillation
+PID_KP = 0.008  # Proportional gain (default: 0.008)
+PID_KI = 0.001  # Integral gain (default: 0.001)
+PID_KD = 0.003  # Derivative gain (default: 0.003)
+PID_MAX_OUTPUT = 0.5  # Max turning speed adjustment
+
+# ============= Camera Configuration =============
+# If camera is mounted facing downward (common for line followers),
+# line below center = robot approaching line (should move forward)
+# line above center = robot passed line (should turn to find it)
+CAMERA_FACING_DOWN = True  # Set to False if camera faces forward
+
+# ============= Display Configuration =============
 DISPLAY_TEXT_COLOR = (255, 255, 255)
 DISPLAY_FONT = cv2.FONT_HERSHEY_SIMPLEX
 DISPLAY_FONT_SCALE = 0.5
@@ -37,7 +56,7 @@ class RedLineTracker:
     
     def __init__(self, camera_index: int = CAMERA_INDEX):
         """
-        Initialize the red line tracker.
+        Initialize the red line tracker with PID control.
         
         Args:
             camera_index: Index of the camera device (default 0)
@@ -48,21 +67,36 @@ class RedLineTracker:
         
         if not self.cap.isOpened():
             raise RuntimeError("Failed to open camera device")
+        
+        # Initialize PID controller for smooth line following
+        # Error input: deviation from center (in pixels)
+        # Output: turning speed adjustment (normalized -1.0 to 1.0)
+        self.pid = PIDController(kp=PID_KP, ki=PID_KI, kd=PID_KD)
     
     def process_frame(self, frame: np.ndarray) -> np.ndarray:
         """
         Convert frame to HSV and create mask for red color.
+        Includes morphological filtering to reduce noise.
         
         Args:
             frame: Input frame in BGR format
         
         Returns:
-            Binary mask of red pixels
+            Binary mask of red pixels (cleaned with morphological operations)
         """
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask1 = cv2.inRange(hsv, LOWER_RED1, UPPER_RED1)
         mask2 = cv2.inRange(hsv, LOWER_RED2, UPPER_RED2)
-        return mask1 | mask2
+        mask = mask1 | mask2
+        
+        # Apply morphological operations to reduce noise
+        # Erode removes small noise particles
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.erode(mask, kernel, iterations=1)
+        # Dilate restores the size of remaining objects
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        
+        return mask
     
     def analyze_contours(self, mask: np.ndarray) -> tuple:
         """
@@ -105,7 +139,12 @@ class RedLineTracker:
     def control_robot_movement(self, detected: bool, deviation_x: int, 
                               deviation_y: int) -> None:
         """
-        Control robot movement based on line detection and deviation.
+        Control robot movement based on line detection using PID control.
+        
+        PID output adjusts motor speeds proportionally:
+        - Negative PID output: turn left (reduce left motor speed, increase right)
+        - Positive PID output: turn right (increase left motor speed, reduce right)
+        - Zero PID output: go straight
         
         Args:
             detected: Whether the red line was detected
@@ -113,27 +152,39 @@ class RedLineTracker:
             deviation_y: Vertical deviation from frame center (pixels)
         """
         if not detected:
-            # No line detected, search for it
+            # No line detected, search for it by rotating
             set_motors_direction('rotate_left', MOTOR_SPEED, 0, 0)
             return
         
-        # If line is below center (approaching)
-        if deviation_y > 0:
-            if abs(deviation_x) > DEVIATION_THRESHOLD:
-                # Significant horizontal deviation, rotate to align
-                if deviation_x < 0:
-                    set_motors_direction('rotate_left', MOTOR_SPEED, 0, 0)
-                else:
-                    set_motors_direction('rotate_right', MOTOR_SPEED, 0, 0)
-            else:
-                # Line near center, move forward
-                set_motors_direction('go_forward', MOTOR_SPEED, 0, 0)
-        else:
-            # Line is above center, rotate to align
-            if deviation_x < 0:
-                set_motors_direction('rotate_left', MOTOR_SPEED, 0, 0)
-            else:
-                set_motors_direction('rotate_right', MOTOR_SPEED, 0, 0)
+        # For camera facing down: positive deviation_y means line is approaching
+        # For camera facing forward: logic would be inverted
+        # Use PID to calculate smooth turning adjustment based on horizontal error
+        pid_output = self.pid.calculate(error=deviation_x)
+        
+        # Clamp PID output to reasonable range
+        pid_output = max(-PID_MAX_OUTPUT, min(PID_MAX_OUTPUT, pid_output))
+        
+        # Calculate motor speeds with PID adjustment
+        # Base speed is MOTOR_SPEED, adjusted by PID output
+        base_speed = MOTOR_SPEED
+        left_speed = base_speed - pid_output
+        right_speed = base_speed + pid_output
+        
+        # Clamp speeds to valid range [0, 1.0]
+        left_speed = max(0, min(1.0, left_speed))
+        right_speed = max(0, min(1.0, right_speed))
+        
+        # Apply motor commands with smooth PID-adjusted speeds
+        # This replaces the old binary on/off logic with proportional control
+        if CAMERA_FACING_DOWN and deviation_y > 0:
+            # Line is below center (approaching) - move forward with PID adjustment
+            # Use custom motor direction with adjusted speeds
+            set_motors_direction('go_forward', left_speed, right_speed, 0)
+        elif not CAMERA_FACING_DOWN or deviation_y <= 0:
+            # Line is above center or camera facing forward - prioritize finding line
+            # Still use PID for smooth rotation
+            set_motors_direction('rotate_right' if pid_output > 0 else 'rotate_left', 
+                               left_speed, right_speed, 0)
     
     def display_info(self, frame: np.ndarray, detected: bool, 
                     deviation_x: int, deviation_y: int) -> None:

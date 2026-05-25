@@ -41,6 +41,10 @@ app = Flask(__name__)
 robot = Modes()
 logger = Logger()
 
+# ============= Thread Safety =============
+# Lock to prevent race conditions when multiple threads access robot state
+robot_lock = threading.Lock()
+
 # ============= Authentication Decorator =============
 def require_auth(f):
     """Decorator to require API token authentication via Authorization header.
@@ -123,7 +127,9 @@ def generate_video_frames(mode: str) -> bytes:
             continue
         except Exception as e:
             logger.log_error(f"Error in video frame generation: {e}")
-            break
+            # Continue streaming instead of breaking on exception
+            # This prevents the stream from stopping permanently
+            continue
 
 
 @app.route('/')
@@ -247,26 +253,56 @@ def get_status() -> tuple:
         JSON with battery, sensor, and motor status
     """
     try:
-        battery_status = robot.battery.read_battery_status()
-        front_distance = robot.ultrasonic_sensors.get_distance("front")
-        left_distance = robot.ultrasonic_sensors.get_distance("left")
-        right_distance = robot.ultrasonic_sensors.get_distance("right")
-        
         status_data = {
-            "voltage": battery_status[0],
-            "current": battery_status[1],
-            "power": battery_status[2],
-            "battery_level": battery_status[3],
-            "remaining_time": battery_status[4],
-            "water_status": "Available" if robot.is_watering else "Empty",
-            "wheel_speed": robot.vx,
-            "front_sensor": front_distance,
-            "left_sensor": left_distance,
-            "right_sensor": right_distance,
-            "robot_direction": robot.direction,
-            "servo_bottom": robot.bottom_angle,
-            "servo_top": robot.top_angle
+            "voltage": 0,
+            "current": 0,
+            "power": 0,
+            "battery_level": 0,
+            "remaining_time": "N/A",
+            "water_status": "Unknown",
+            "wheel_speed": 0,
+            "front_sensor": 0,
+            "left_sensor": 0,
+            "right_sensor": 0,
+            "robot_direction": "Unknown",
+            "servo_bottom": 0,
+            "servo_top": 0
         }
+        
+        # Read battery status if available
+        if hasattr(robot, 'battery') and robot.battery is not None:
+            try:
+                battery_status = robot.battery.read_battery_status()
+                status_data.update({
+                    "voltage": battery_status[0],
+                    "current": battery_status[1],
+                    "power": battery_status[2],
+                    "battery_level": battery_status[3],
+                    "remaining_time": battery_status[4]
+                })
+            except Exception as e:
+                logger.log_warning(f"Failed to read battery status: {e}")
+        
+        # Read sensor distances if available
+        if hasattr(robot, 'ultrasonic_sensors') and robot.ultrasonic_sensors is not None:
+            try:
+                status_data["front_sensor"] = robot.ultrasonic_sensors.get_distance("front")
+                status_data["left_sensor"] = robot.ultrasonic_sensors.get_distance("left")
+                status_data["right_sensor"] = robot.ultrasonic_sensors.get_distance("right")
+            except Exception as e:
+                logger.log_warning(f"Failed to read ultrasonic sensors: {e}")
+        
+        # Read other robot state
+        try:
+            status_data.update({
+                "water_status": "Available" if robot.is_watering else "Empty",
+                "wheel_speed": robot.vx if hasattr(robot, 'vx') else 0,
+                "robot_direction": robot.direction if hasattr(robot, 'direction') else "Unknown",
+                "servo_bottom": robot.bottom_angle if hasattr(robot, 'bottom_angle') else 0,
+                "servo_top": robot.top_angle if hasattr(robot, 'top_angle') else 0
+            })
+        except Exception as e:
+            logger.log_warning(f"Failed to read robot state: {e}")
         
         return jsonify(status_data)
     
@@ -299,35 +335,37 @@ def manual_control() -> tuple:
         if command not in valid_commands:
             return jsonify({"error": f"Invalid command: {command}"}), 400
         
-        # Handle speed control
-        if command in ['+', '=']:
-            robot.n = min(robot.n + 1, MAX_SPEED_LEVEL)
-            robot.vx = robot.n * robot.speed
-            robot.vy = robot.n * robot.speed
-            state_msg = f"Speed increased to {robot.n * 10}%"
-        
-        elif command in ['-', '_']:
-            robot.n = max(robot.n - 1, MIN_SPEED_LEVEL)
-            robot.vx = robot.n * robot.speed
-            robot.vy = robot.n * robot.speed
-            state_msg = f"Speed decreased to {robot.n * 10}%"
-        
-        # Handle movement commands
-        elif command in direction:
-            move_direction = direction[command]
-            robot.set_motors_direction(move_direction, robot.vx, robot.vy, 
-                                      robot.theta)
-            state_msg = f"Moving: {move_direction}"
-        
-        # Handle water pump
-        elif command == 'r':
-            robot.relay_control.run_relay_for_duration()
-            state_msg = "Watering activated"
-        
-        else:
-            state_msg = "Command executed"
-        
-        robot.update_state(state_msg)
+        # Use lock to prevent race condition when updating robot state
+        with robot_lock:
+            # Handle speed control
+            if command in ['+', '=']:
+                robot.n = min(robot.n + 1, MAX_SPEED_LEVEL)
+                robot.vx = robot.n * robot.speed
+                robot.vy = robot.n * robot.speed
+                state_msg = f"Speed increased to {robot.n * 10}%"
+            
+            elif command in ['-', '_']:
+                robot.n = max(robot.n - 1, MIN_SPEED_LEVEL)
+                robot.vx = robot.n * robot.speed
+                robot.vy = robot.n * robot.speed
+                state_msg = f"Speed decreased to {robot.n * 10}%"
+            
+            # Handle movement commands
+            elif command in direction:
+                move_direction = direction[command]
+                robot.set_motors_direction(move_direction, robot.vx, robot.vy, 
+                                          robot.theta)
+                state_msg = f"Moving: {move_direction}"
+            
+            # Handle water pump
+            elif command == 'r':
+                robot.relay_control.run_relay_for_duration()
+                state_msg = "Watering activated"
+            
+            else:
+                state_msg = "Command executed"
+            
+            robot.update_state(state_msg)
         logger.log_info(f"Command executed: {command}")
         
         return jsonify({"status": "success", "message": state_msg})

@@ -347,7 +347,15 @@ def example_5_integrated_system():
             detection = line_follower.detect_line(frame)
             
             # STEP 2: Simulate obstacle detection
-            # (In real system, read from ultrasonic sensors)
+            # NOTE: This is simulated data for demonstration purposes only!
+            # In a real robot system, replace with actual sensor readings:
+            #   front_distance = robot.ultrasonic_sensors.get_distance("front")
+            #   left_distance = robot.ultrasonic_sensors.get_distance("left")
+            #   right_distance = robot.ultrasonic_sensors.get_distance("right")
+            # 
+            # For testing without physical sensors, this example uses:
+            # - Random distances in realistic ranges (0.4m to 2.0m)
+            # - Periodic "obstacle detection" (simulated_front_distance < 0.6m)
             simulated_front_distance = np.random.uniform(0.5, 2.0)
             sensor_data = ObstacleData(
                 front_distance=simulated_front_distance,
