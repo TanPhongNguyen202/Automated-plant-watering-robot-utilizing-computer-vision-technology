@@ -7,15 +7,28 @@ from flask import Flask, render_template, Response, jsonify, request
 from datetime import datetime
 import cv2
 from queue import Empty
+import threading
+import os
+from functools import wraps
 
 from src.robot.modes import Modes
 from src.utils.logger import Logger
 from src.utils.control_utils import direction
 
-# ============= Configuration =============
-SERVER_HOST = '0.0.0.0'
-SERVER_PORT = 5000
-DEBUG_MODE = False
+# ============= Configuration (from Environment Variables) =============
+# These can be overridden by setting environment variables
+# Examples:
+#   export ROBOT_SERVER_HOST="192.168.1.100"
+#   export ROBOT_SERVER_PORT="8080"
+#   export ROBOT_DEBUG_MODE="True"
+#   export ROBOT_API_TOKEN="super_secret_token"
+SERVER_HOST = os.getenv('ROBOT_SERVER_HOST', '0.0.0.0')
+SERVER_PORT = int(os.getenv('ROBOT_SERVER_PORT', 5000))
+DEBUG_MODE = os.getenv('ROBOT_DEBUG_MODE', 'False').lower() == 'true'
+
+# Security: Token-based authentication (set via environment variable)
+# None = no authentication (development only - NOT recommended for production!)
+API_TOKEN = os.getenv('ROBOT_API_TOKEN', None)
 MAX_SPEED_LEVEL = 10
 MIN_SPEED_LEVEL = 0
 FRAME_INDICES = {
@@ -27,6 +40,44 @@ FRAME_INDICES = {
 app = Flask(__name__)
 robot = Modes()
 logger = Logger()
+
+# ============= Authentication Decorator =============
+def require_auth(f):
+    """Decorator to require API token authentication via Authorization header.
+    
+    Usage on routes:
+        @app.route('/protected')
+        @require_auth
+        def protected_route():
+            return jsonify({"status": "authorized"})
+    
+    Client must send:
+        Authorization: Bearer <token>
+    
+    If ROBOT_API_TOKEN is not set (None), authentication is DISABLED (development mode).
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # If no token is set in environment, disable auth (development mode)
+        if API_TOKEN is None:
+            return f(*args, **kwargs)
+        
+        # Check for Authorization header
+        auth_header = request.headers.get('Authorization', '')
+        
+        # Extract token from "Bearer <token>" format
+        if not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+        
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        
+        # Validate token (simple string comparison; production should use JWT)
+        if token != API_TOKEN:
+            return jsonify({"error": "Invalid API token"}), 403
+        
+        return f(*args, **kwargs)
+    
+    return decorated_function
 
 try:
     frame_queue = robot.frame_queue
@@ -99,6 +150,7 @@ def video_feed_object() -> Response:
 
 
 @app.route('/mode', methods=['POST'])
+@require_auth
 def set_mode() -> tuple:
     """
     Set robot operating mode.
@@ -130,6 +182,7 @@ def set_mode() -> tuple:
 
 
 @app.route('/auto-command', methods=['POST'])
+@require_auth
 def auto_command() -> tuple:
     """
     Configure and start automatic mode.
@@ -166,7 +219,15 @@ def auto_command() -> tuple:
             return jsonify({"error": f"Invalid time format: {e}"}), 400
         
         robot.switch_mode("automatic")
-        robot.automatic_mode()
+        
+        # Start automatic mode in a background thread (non-blocking)
+        # This prevents the Flask route from blocking the entire server
+        mission_thread = threading.Thread(
+            target=robot.automatic_mode,
+            daemon=True,
+            name="RobotAutomaticModeThread"
+        )
+        mission_thread.start()
         
         logger.log_info(f"Auto mission started: {start_time_str} - {end_time_str}")
         return jsonify({"success": True, "mission": mission})
@@ -177,6 +238,7 @@ def auto_command() -> tuple:
 
 
 @app.route('/status', methods=['GET'])
+@require_auth
 def get_status() -> tuple:
     """
     Get current robot status.
@@ -214,6 +276,7 @@ def get_status() -> tuple:
 
 
 @app.route('/control', methods=['POST'])
+@require_auth
 def manual_control() -> tuple:
     """
     Handle manual control commands.
@@ -289,4 +352,22 @@ def internal_error(error) -> tuple:
 
 if __name__ == '__main__':
     logger.log_info(f"Starting robot server on {SERVER_HOST}:{SERVER_PORT}")
-    app.run(host=SERVER_HOST, port=SERVER_PORT, debug=DEBUG_MODE)
+    
+    # Log security status
+    if API_TOKEN is None:
+        logger.log_error("⚠️  WARNING: API authentication DISABLED! Set ROBOT_API_TOKEN to enable.")
+        logger.log_error("   Anyone on the network can control the robot!")
+    else:
+        logger.log_info("✓ API authentication ENABLED")
+    
+    # Log debug mode status
+    if DEBUG_MODE:
+        logger.log_error("⚠️  WARNING: DEBUG MODE ENABLED! Do not use in production!")
+    
+    # Start Flask app with threading support for non-blocking routes
+    app.run(
+        host=SERVER_HOST,
+        port=SERVER_PORT,
+        debug=DEBUG_MODE,
+        threaded=True
+    )
