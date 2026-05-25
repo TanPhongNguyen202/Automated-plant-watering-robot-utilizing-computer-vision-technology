@@ -1,13 +1,14 @@
 """
 Robot Web Server Module
-Provides REST API for remote control and status monitoring of the robot.
+Provides Secure REST API for remote control and status monitoring of the robot.
+Combines V2's security/environment config with V1's ironclad thread safety.
 """
 
+import threading
 from flask import Flask, render_template, Response, jsonify, request
 from datetime import datetime
 import cv2
 from queue import Empty
-import threading
 import os
 from functools import wraps
 
@@ -16,18 +17,11 @@ from src.utils.logger import Logger
 from src.utils.control_utils import direction
 
 # ============= Configuration (from Environment Variables) =============
-# These can be overridden by setting environment variables
-# Examples:
-#   export ROBOT_SERVER_HOST="192.168.1.100"
-#   export ROBOT_SERVER_PORT="8080"
-#   export ROBOT_DEBUG_MODE="True"
-#   export ROBOT_API_TOKEN="super_secret_token"
 SERVER_HOST = os.getenv('ROBOT_SERVER_HOST', '0.0.0.0')
 SERVER_PORT = int(os.getenv('ROBOT_SERVER_PORT', 5000))
 DEBUG_MODE = os.getenv('ROBOT_DEBUG_MODE', 'False').lower() == 'true'
 
-# Security: Token-based authentication (set via environment variable)
-# None = no authentication (development only - NOT recommended for production!)
+# Security: Token-based authentication
 API_TOKEN = os.getenv('ROBOT_API_TOKEN', None)
 MAX_SPEED_LEVEL = 10
 MIN_SPEED_LEVEL = 0
@@ -41,47 +35,9 @@ app = Flask(__name__)
 robot = Modes()
 logger = Logger()
 
-# ============= Thread Safety =============
-# Lock to prevent race conditions when multiple threads access robot state
+# FIX V3: Khôi phục Lock và biến track luồng bảo vệ trạng thái robot tuyệt đối
 robot_lock = threading.Lock()
-
-# ============= Authentication Decorator =============
-def require_auth(f):
-    """Decorator to require API token authentication via Authorization header.
-    
-    Usage on routes:
-        @app.route('/protected')
-        @require_auth
-        def protected_route():
-            return jsonify({"status": "authorized"})
-    
-    Client must send:
-        Authorization: Bearer <token>
-    
-    If ROBOT_API_TOKEN is not set (None), authentication is DISABLED (development mode).
-    """
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # If no token is set in environment, disable auth (development mode)
-        if API_TOKEN is None:
-            return f(*args, **kwargs)
-        
-        # Check for Authorization header
-        auth_header = request.headers.get('Authorization', '')
-        
-        # Extract token from "Bearer <token>" format
-        if not auth_header.startswith('Bearer '):
-            return jsonify({"error": "Missing or invalid Authorization header"}), 401
-        
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        
-        # Validate token (simple string comparison; production should use JWT)
-        if token != API_TOKEN:
-            return jsonify({"error": "Invalid API token"}), 403
-        
-        return f(*args, **kwargs)
-    
-    return decorated_function
+_auto_thread: threading.Thread | None = None
 
 try:
     frame_queue = robot.frame_queue
@@ -90,15 +46,33 @@ except AttributeError:
     frame_queue = None
 
 
-def generate_video_frames(mode: str) -> bytes:
+# ============= Authentication Decorator =============
+def require_auth(f):
+    """Decorator to require API token authentication via Authorization header."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if API_TOKEN is None:
+            return f(*args, **kwargs)
+        
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return jsonify({"error": "Missing or invalid Authorization header"}), 401
+        
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        if token != API_TOKEN:
+            return jsonify({"error": "Invalid API token"}), 403
+        
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ============= Video Streaming =============
+def generate_video_frames(mode: str):
     """
     Generate video frames for streaming.
     
-    Args:
-        mode: Frame type ('color' or 'object')
-    
-    Yields:
-        JPEG encoded frame bytes
+    Đã cải tiến: Tự phục hồi khi lỗi thoáng qua, nhưng ngắt stream an toàn 
+    nếu lỗi liên tiếp vượt ngưỡng (tránh tràn tài nguyên khi mất camera hẳn).
     """
     if frame_queue is None:
         logger.log_warning("Frame queue unavailable for video streaming")
@@ -109,29 +83,33 @@ def generate_video_frames(mode: str) -> bytes:
         logger.log_error(f"Unknown frame mode: {mode}")
         return
     
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 10
+
     while True:
         try:
             frame_data = frame_queue.get(timeout=1)
-            
             if frame_data and len(frame_data) > frame_index:
                 output_frame = frame_data[frame_index]
-                
                 if output_frame is not None:
                     _, buffer = cv2.imencode('.jpg', output_frame)
                     frame_bytes = (b'--frame\r\n'
-                                 b'Content-Type: image/jpeg\r\n\r\n' + 
-                                 buffer.tobytes() + b'\r\n')
+                                   b'Content-Type: image/jpeg\r\n\r\n' + 
+                                   buffer.tobytes() + b'\r\n')
                     yield frame_bytes
-        
+                    consecutive_errors = 0  # Reset counter khi thành công
         except Empty:
             continue
         except Exception as e:
-            logger.log_error(f"Error in video frame generation: {e}")
-            # Continue streaming instead of breaking on exception
-            # This prevents the stream from stopping permanently
+            consecutive_errors += 1
+            logger.log_error(f"Error in video frame generation: {e} (#{consecutive_errors})")
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                logger.log_error("Too many consecutive errors, stopping stream safely")
+                break
             continue
 
 
+# ============= Routes =============
 @app.route('/')
 def index() -> str:
     """Serve the main HTML interface."""
@@ -144,7 +122,7 @@ def video_feed_color() -> Response:
     """Stream color detection video feed."""
     logger.log_info("Color video stream started")
     return Response(generate_video_frames('color'),
-                   mimetype='multipart/x-mixed-replace; boundary=frame')
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.route('/video_feed/object')
@@ -152,20 +130,13 @@ def video_feed_object() -> Response:
     """Stream object detection video feed."""
     logger.log_info("Object video stream started")
     return Response(generate_video_frames('object'),
-                   mimetype='multipart/x-mixed-replace; boundary=frame')
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.route('/mode', methods=['POST'])
 @require_auth
 def set_mode() -> tuple:
-    """
-    Set robot operating mode.
-    
-    JSON payload: {"mode": "manual" or "automatic"}
-    
-    Returns:
-        JSON response with success status
-    """
+    """Set robot operating mode."""
     try:
         data = request.get_json()
         if not data:
@@ -173,15 +144,15 @@ def set_mode() -> tuple:
         
         mode_value = data.get("mode", "").lower()
         valid_modes = {"manual", "automatic"}
-        
         if mode_value not in valid_modes:
             return jsonify({"error": f"Invalid mode. Must be one of {valid_modes}"}), 400
         
-        robot.switch_mode(mode_value)
+        # FIX V3: Đưa Lock bảo vệ trở lại khi can thiệp ghi trạng thái robot
+        with robot_lock:
+            robot.switch_mode(mode_value)
+            
         logger.log_info(f"Mode switched to: {mode_value}")
-        
         return jsonify({"success": True, "mode": mode_value})
-    
     except Exception as e:
         logger.log_error(f"Error setting mode: {e}")
         return jsonify({"error": str(e)}), 500
@@ -190,24 +161,13 @@ def set_mode() -> tuple:
 @app.route('/auto-command', methods=['POST'])
 @require_auth
 def auto_command() -> tuple:
-    """
-    Configure and start automatic mode.
-    
-    JSON payload: {
-        "value1": mission_type (int),
-        "startTime": "HH:MM",
-        "endTime": "HH:MM"
-    }
-    
-    Returns:
-        JSON response with success status
-    """
+    """Configure and start automatic mode in background thread."""
+    global _auto_thread
     try:
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
         
-        # Validate and extract parameters
         mission = data.get("value1", 0)
         start_time_str = data.get("startTime")
         end_time_str = data.get("endTime")
@@ -215,29 +175,32 @@ def auto_command() -> tuple:
         if not start_time_str or not end_time_str:
             return jsonify({"error": "Missing startTime or endTime"}), 400
         
-        try:
-            robot.daily_mission = int(mission)
-            robot.OPERATION_START_TIME = datetime.strptime(start_time_str, 
-                                                           '%H:%M').time()
-            robot.OPERATION_END_TIME = datetime.strptime(end_time_str, 
-                                                         '%H:%M').time()
-        except ValueError as e:
-            return jsonify({"error": f"Invalid time format: {e}"}), 400
+        # FIX V3: Lock khi cấu hình các thông số nhiệm vụ phần cứng
+        with robot_lock:
+            try:
+                robot.daily_mission = int(mission)
+                robot.OPERATION_START_TIME = datetime.strptime(start_time_str, '%H:%M').time()
+                robot.OPERATION_END_TIME = datetime.strptime(end_time_str, '%H:%M').time()
+            except ValueError as e:
+                return jsonify({"error": f"Invalid time format: {e}"}), 400
+            
+            robot.switch_mode("automatic")
         
-        robot.switch_mode("automatic")
-        
-        # Start automatic mode in a background thread (non-blocking)
-        # This prevents the Flask route from blocking the entire server
-        mission_thread = threading.Thread(
+        # FIX V3: Kiểm tra và ngăn chặn đẻ vô hạn thread đè lệnh phần cứng
+        if _auto_thread is not None and _auto_thread.is_alive():
+            return jsonify({
+                "error": "Automatic mode is already running. Stop it first before starting a new mission."
+            }), 409
+
+        _auto_thread = threading.Thread(
             target=robot.automatic_mode,
             daemon=True,
             name="RobotAutomaticModeThread"
         )
-        mission_thread.start()
+        _auto_thread.start()
         
         logger.log_info(f"Auto mission started: {start_time_str} - {end_time_str}")
         return jsonify({"success": True, "mission": mission})
-    
     except Exception as e:
         logger.log_error(f"Error in auto command: {e}")
         return jsonify({"error": str(e)}), 500
@@ -246,66 +209,45 @@ def auto_command() -> tuple:
 @app.route('/status', methods=['GET'])
 @require_auth
 def get_status() -> tuple:
-    """
-    Get current robot status.
-    
-    Returns:
-        JSON with battery, sensor, and motor status
-    """
+    """Get current robot status với cơ chế bảo vệ thread-safe cô lập."""
     try:
-        status_data = {
-            "voltage": 0,
-            "current": 0,
-            "power": 0,
-            "battery_level": 0,
-            "remaining_time": "N/A",
-            "water_status": "Unknown",
-            "wheel_speed": 0,
-            "front_sensor": 0,
-            "left_sensor": 0,
-            "right_sensor": 0,
-            "robot_direction": "Unknown",
-            "servo_bottom": 0,
-            "servo_top": 0
-        }
-        
-        # Read battery status if available
-        if hasattr(robot, 'battery') and robot.battery is not None:
+        # FIX V3: Lock toàn bộ quá trình đọc để tránh race-condition với luồng điều khiển
+        with robot_lock:
+            # Đọc cảm biến riêng lẻ (cô lập ngoại lệ bằng try-except con như V1)
             try:
-                battery_status = robot.battery.read_battery_status()
-                status_data.update({
-                    "voltage": battery_status[0],
-                    "current": battery_status[1],
-                    "power": battery_status[2],
-                    "battery_level": battery_status[3],
-                    "remaining_time": battery_status[4]
-                })
+                battery_status = robot.battery.read_battery_status() if getattr(robot, 'battery', None) else None
+                voltage, current, power, battery_level, remaining_time = battery_status if battery_status else (0, 0, 0, 0, "N/A")
             except Exception as e:
                 logger.log_warning(f"Failed to read battery status: {e}")
-        
-        # Read sensor distances if available
-        if hasattr(robot, 'ultrasonic_sensors') and robot.ultrasonic_sensors is not None:
+                voltage = current = power = battery_level = 0
+                remaining_time = "N/A"
+            
             try:
-                status_data["front_sensor"] = robot.ultrasonic_sensors.get_distance("front")
-                status_data["left_sensor"] = robot.ultrasonic_sensors.get_distance("left")
-                status_data["right_sensor"] = robot.ultrasonic_sensors.get_distance("right")
+                front_distance = robot.ultrasonic_sensors.get_distance("front") if getattr(robot, 'ultrasonic_sensors', None) else 0
+                left_distance = robot.ultrasonic_sensors.get_distance("left") if getattr(robot, 'ultrasonic_sensors', None) else 0
+                right_distance = robot.ultrasonic_sensors.get_distance("right") if getattr(robot, 'ultrasonic_sensors', None) else 0
             except Exception as e:
                 logger.log_warning(f"Failed to read ultrasonic sensors: {e}")
-        
-        # Read other robot state
-        try:
-            status_data.update({
-                "water_status": "Available" if robot.is_watering else "Empty",
-                "wheel_speed": robot.vx if hasattr(robot, 'vx') else 0,
-                "robot_direction": robot.direction if hasattr(robot, 'direction') else "Unknown",
-                "servo_bottom": robot.bottom_angle if hasattr(robot, 'bottom_angle') else 0,
-                "servo_top": robot.top_angle if hasattr(robot, 'top_angle') else 0
-            })
-        except Exception as e:
-            logger.log_warning(f"Failed to read robot state: {e}")
-        
+                front_distance = left_distance = right_distance = 0
+                
+            status_data = {
+                "voltage": voltage,
+                "current": current,
+                "power": power,
+                "battery_level": battery_level,
+                "remaining_time": remaining_time,
+                "water_status": "Available" if getattr(robot, 'is_watering', False) else "Empty",
+                "wheel_speed": getattr(robot, 'vx', 0),
+                "front_sensor": front_distance,
+                "left_sensor": left_distance,
+                "right_sensor": right_distance,
+                "robot_direction": getattr(robot, 'direction', 'Unknown'),
+                "servo_bottom": getattr(robot, 'bottom_angle', 0),
+                "servo_top": getattr(robot, 'top_angle', 0),
+                "auto_thread_alive": _auto_thread.is_alive() if _auto_thread else False
+            }
+            
         return jsonify(status_data)
-    
     except Exception as e:
         logger.log_error(f"Error getting status: {e}")
         return jsonify({"error": str(e)}), 500
@@ -314,14 +256,7 @@ def get_status() -> tuple:
 @app.route('/control', methods=['POST'])
 @require_auth
 def manual_control() -> tuple:
-    """
-    Handle manual control commands.
-    
-    JSON payload: {"command": "w/a/s/d/q/e/z/x/r/+/-/1/2/3"}
-    
-    Returns:
-        JSON response with command status
-    """
+    """Handle manual control commands."""
     try:
         data = request.get_json()
         if not data:
@@ -335,9 +270,7 @@ def manual_control() -> tuple:
         if command not in valid_commands:
             return jsonify({"error": f"Invalid command: {command}"}), 400
         
-        # Use lock to prevent race condition when updating robot state
         with robot_lock:
-            # Handle speed control
             if command in ['+', '=']:
                 robot.n = min(robot.n + 1, MAX_SPEED_LEVEL)
                 robot.vx = robot.n * robot.speed
@@ -350,14 +283,11 @@ def manual_control() -> tuple:
                 robot.vy = robot.n * robot.speed
                 state_msg = f"Speed decreased to {robot.n * 10}%"
             
-            # Handle movement commands
             elif command in direction:
                 move_direction = direction[command]
-                robot.set_motors_direction(move_direction, robot.vx, robot.vy, 
-                                          robot.theta)
+                robot.set_motors_direction(move_direction, robot.vx, robot.vy, robot.theta)
                 state_msg = f"Moving: {move_direction}"
             
-            # Handle water pump
             elif command == 'r':
                 robot.relay_control.run_relay_for_duration()
                 state_msg = "Watering activated"
@@ -366,24 +296,29 @@ def manual_control() -> tuple:
                 state_msg = "Command executed"
             
             robot.update_state(state_msg)
+            
         logger.log_info(f"Command executed: {command}")
-        
         return jsonify({"status": "success", "message": state_msg})
-    
     except Exception as e:
         logger.log_error(f"Error in manual control: {e}")
         return jsonify({"error": str(e)}), 500
 
 
+@app.route('/auto-status', methods=['GET'])
+def auto_status() -> tuple:
+    """Kiểm tra trạng thái auto thread."""
+    return jsonify({
+        "running": _auto_thread.is_alive() if _auto_thread else False
+    })
+
+
 @app.errorhandler(404)
 def not_found(error) -> tuple:
-    """Handle 404 errors."""
     return jsonify({"error": "Endpoint not found"}), 404
 
 
 @app.errorhandler(500)
 def internal_error(error) -> tuple:
-    """Handle 500 errors."""
     logger.log_error(f"Internal server error: {error}")
     return jsonify({"error": "Internal server error"}), 500
 
@@ -391,18 +326,14 @@ def internal_error(error) -> tuple:
 if __name__ == '__main__':
     logger.log_info(f"Starting robot server on {SERVER_HOST}:{SERVER_PORT}")
     
-    # Log security status
     if API_TOKEN is None:
         logger.log_error("⚠️  WARNING: API authentication DISABLED! Set ROBOT_API_TOKEN to enable.")
-        logger.log_error("   Anyone on the network can control the robot!")
     else:
         logger.log_info("✓ API authentication ENABLED")
-    
-    # Log debug mode status
+        
     if DEBUG_MODE:
         logger.log_error("⚠️  WARNING: DEBUG MODE ENABLED! Do not use in production!")
     
-    # Start Flask app with threading support for non-blocking routes
     app.run(
         host=SERVER_HOST,
         port=SERVER_PORT,

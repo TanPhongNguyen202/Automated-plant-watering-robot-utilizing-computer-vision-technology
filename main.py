@@ -7,7 +7,7 @@ from src.robot.modes import Modes
 from src.utils.logger import Logger
 from time import sleep
 
-# Constants
+# Constants (Kept exactly as previous versions)
 MENU_SLEEP_TIME = 1
 VALID_OPTIONS = {'1', '2', '3'}
 OPTION_MANUAL = '1'
@@ -62,6 +62,8 @@ def main() -> None:
     logger = Logger()
     logger.log_info("Robot system starting...")
     
+    # FIX #4: Only ONE instance of Modes handles everything. 
+    # No standalone Motors() to prevent Raspberry Pi GPIO Pin multiplexing conflicts.
     modes = Modes()
     current_mode = None
 
@@ -87,25 +89,29 @@ def main() -> None:
             sleep(MENU_SLEEP_TIME)
 
     except KeyboardInterrupt:
-        logger.log_info("Robot system interrupted by user.")
+        logger.log_info("Robot system interrupted by user (Ctrl+C).")
     except Exception as e:
         logger.log_error(f"An error occurred: {e}")
     finally:
-        # Cleanup: stop motors and release resources
+        # Ironclad Cleanup: Stop motors and release resources safely
+        logger.log_info("Executing system cleanup...")
         try:
-            # Call cleanup method if available (releases camera, stops motors)
+            # Check for explicit cleanup method (preferred - releases camera/GPIOs)
             if hasattr(modes, 'cleanup') and callable(modes.cleanup):
                 modes.cleanup()
-                logger.log_info("Robot cleanup completed")
-            else:
-                # Fallback: stop motors directly
-                if hasattr(modes, 'motors') and modes.motors is not None:
+                logger.log_info("Robot cleanup completed successfully.")
+            # Fallback: stop motors directly via internal modes attribute
+            elif hasattr(modes, 'motors') and modes.motors is not None:
+                if hasattr(modes.motors, 'stop_all') and callable(modes.motors.stop_all):
                     modes.motors.stop_all()
-                    logger.log_info("Motors stopped")
+                    logger.log_info("Motors stopped via fallback mechanism.")
+            else:
+                logger.log_warning("No explicit cleanup or motor control methods found in Modes.")
         except Exception as cleanup_error:
-            logger.log_error(f"Error during cleanup: {cleanup_error}")
+            logger.log_error(f"Critical error during hardware cleanup: {cleanup_error}")
         
         logger.log_info("Robot system stopped.")
+
 
 if __name__ == "__main__":
     main()
