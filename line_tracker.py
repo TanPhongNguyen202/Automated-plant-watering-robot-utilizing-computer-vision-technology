@@ -161,30 +161,22 @@ class RedLineTracker:
         # Use PID to calculate smooth turning adjustment based on horizontal error
         pid_output = self.pid.calculate(error=deviation_x)
         
-        # Clamp PID output to reasonable range
+        # Clamp PID output to reasonable range (acts as steering angle)
         pid_output = max(-PID_MAX_OUTPUT, min(PID_MAX_OUTPUT, pid_output))
         
-        # Calculate motor speeds with PID adjustment
-        # Base speed is MOTOR_SPEED, adjusted by PID output
-        base_speed = MOTOR_SPEED
-        left_speed = base_speed - pid_output
-        right_speed = base_speed + pid_output
-        
-        # Clamp speeds to valid range [0, 1.0]
-        left_speed = max(0, min(1.0, left_speed))
-        right_speed = max(0, min(1.0, right_speed))
-        
-        # Apply motor commands with smooth PID-adjusted speeds
-        # This replaces the old binary on/off logic with proportional control
+        # Determine movement based on vertical position
         if CAMERA_FACING_DOWN and deviation_y > 0:
-            # Line is below center (approaching) - move forward with PID adjustment
-            # Use custom motor direction with adjusted speeds
-            set_motors_direction('go_forward', left_speed, right_speed, 0)
-        elif not CAMERA_FACING_DOWN or deviation_y <= 0:
-            # Line is above center or camera facing forward - prioritize finding line
-            # Still use PID for smooth rotation
-            set_motors_direction('rotate_right' if pid_output > 0 else 'rotate_left', 
-                               left_speed, right_speed, 0)
+            # Line is below center (approaching) - move forward with PID-adjusted steering
+            # pid_output acts as steering angle (theta parameter)
+            set_motors_direction('go_forward', MOTOR_SPEED, 0, pid_output)
+        else:
+            # Line is above center or camera facing forward - rotate to align
+            # Pure rotation with PID-adjusted intensity
+            rotation_speed = MOTOR_SPEED * abs(pid_output)
+            if pid_output < 0:
+                set_motors_direction('rotate_left', rotation_speed, 0, 0)
+            else:
+                set_motors_direction('rotate_right', rotation_speed, 0, 0)
     
     def display_info(self, frame: np.ndarray, detected: bool, 
                     deviation_x: int, deviation_y: int) -> None:

@@ -8,8 +8,9 @@ import numpy as np
 from src.utils.control_utils import set_motors_direction
 
 # ============= Camera Configuration =============
+# IMPORTANT: Must match line_tracker.py resolution for consistent testing
 CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 360
+CAMERA_HEIGHT = 480  # Changed from 360 to match line_tracker.py FRAME_HEIGHT
 FRAME_CENTER_X = CAMERA_WIDTH // 2
 FRAME_CENTER_Y = CAMERA_HEIGHT // 2
 
@@ -78,13 +79,18 @@ def detect_red_line(frame: np.ndarray) -> tuple:
     min_rect = cv2.minAreaRect(largest_contour)
     (x_center, y_center), (width, height), angle = min_rect
     
-    # Normalize angle
+    # Normalize angle to [-45, 45] range
+    # Use elif to prevent multiple transformations on same angle (edge case fix)
     if angle < -45:
+        # Rotate frame reference by 90°
         angle = 90 + angle
-    if width < height and angle > 0:
+    elif width < height and angle > 0:
+        # Line is more vertical than horizontal
         angle = (90 - angle) * -1
-    if width > height and angle < 0:
+    elif width > height and angle < 0:
+        # Line is more horizontal than vertical
         angle = 90 + angle
+    # else: angle is already in valid range [-45, 45]
     
     # Calculate horizontal error
     error_x = int(x_center - FRAME_CENTER_X)
